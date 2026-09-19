@@ -3,6 +3,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { Camera } from './camera';
 import { ANALYSIS_WIDTH, detectPage, type Detection } from './cv/detect';
 import { loadOpenCV, type CV } from './cv/loader';
+import { FOCUS_THRESHOLD, centerCrop, laplacianVariance, samplePatch } from './cv/sharpness';
 import { StabilityTracker, curvedOutline, type Quad } from './geometry';
 import { downscale, fileToImageData, imageDataToBlob } from './image';
 import { onOcrProgress, preloadOcr, type OcrLang } from './ocr';
@@ -148,6 +149,11 @@ let tracker: StabilityTracker | null = null;
 let lastDetection: Detection | null = null;
 let processing = false;
 let analysisBusy = false;
+/** Latest focus measure of the page centre (Laplacian variance). */
+let sharpness = 0;
+let sharpSince = 0;
+let softSince = 0;
+let lastRefocus = 0;
 
 function startLoop() {
   if (loopId) return;
@@ -175,12 +181,35 @@ function analyseFrame() {
     const det = detectPage(cv, data, scale);
     lastDetection = det;
     const quad: Quad | null = det ? det.page.corners : null;
-    const progress = tracker.push(quad);
+    let progress = tracker.push(quad);
+
+    // Focus gate: measure crispness at native resolution in the middle of
+    // the page. Auto-capture waits until the text is actually sharp, and a
+    // page that stays soft while held still gets a forced refocus.
+    let focused = true;
+    if (det) {
+      const c = det.page.corners;
+      const cx = ((c[0].x + c[1].x + c[2].x + c[3].x) / 4) * det.scale;
+      const cy = ((c[0].y + c[1].y + c[2].y + c[3].y) / 4) * det.scale;
+      sharpness = laplacianVariance(cv, samplePatch(video, cx, cy));
+      focused = sharpness >= FOCUS_THRESHOLD;
+      if (focused) { sharpSince ||= now; softSince = 0; }
+      else { softSince ||= now; sharpSince = 0; }
+      if (!focused && progress >= 0.6 && now - softSince > 900 && now - lastRefocus > 2500) {
+        lastRefocus = now;
+        void camera.refocus();
+      }
+      if (!focused) progress = Math.min(progress, 0.85);
+    } else {
+      sharpness = 0; sharpSince = 0; softSince = 0;
+    }
+
     drawOverlay(det, progress);
     if (!det) hint.textContent = '페이지를 찾는 중… 책 전체가 화면에 들어오게 해주세요';
+    else if (!focused) hint.textContent = '초점 맞추는 중… 화면을 탭하면 그 위치에 초점을 맞춥니다';
     else if (progress < 1) hint.textContent = autoCapture ? '잠시 멈춰 주세요…' : '페이지 감지됨';
     else hint.textContent = autoCapture ? '촬영!' : '페이지 감지됨 · 셔터를 누르세요';
-    if (autoCapture && tracker.shouldCapture(progress, quad)) {
+    if (autoCapture && focused && now - sharpSince > 250 && tracker.shouldCapture(progress, quad)) {
       tracker.markCaptured(quad!);
       void capture(det);
     }
@@ -230,14 +259,42 @@ function drawOverlay(det: Detection | null, progress: number) {
   }
 }
 
+/**
+ * Captures the sharpest image we can get: a full-resolution still from the
+ * camera (with its own focus cycle) when the platform supports it, otherwise
+ * the preview frame. Whichever candidate is crisper wins, and a capture that
+ * is still soft is retried once after a forced refocus.
+ */
+async function acquireFrame(): Promise<{ frame: ImageData; fromStill: boolean }> {
+  const preview = camera.grabFrame();
+  const previewScore = laplacianVariance(cv, centerCrop(preview));
+  let best = { frame: preview, score: previewScore, fromStill: false };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const still = await camera.takePhoto();
+    if (!still) break;
+    // Compare at the same pixel scale so resolution does not bias the score.
+    const f = preview.width / still.width;
+    const stillScore = laplacianVariance(cv, centerCrop(still, Math.round(600 / f)));
+    if (stillScore >= best.score * 0.9 || still.width > preview.width * 1.3) best = { frame: still, score: stillScore, fromStill: true };
+    if (best.score >= FOCUS_THRESHOLD) break;
+    busy(true, '초점 다시 맞추는 중…', 0.05);
+    await camera.refocus();
+  }
+  return { frame: best.frame, fromStill: best.fromStill };
+}
+
 async function capture(det: Detection | null) {
   if (!cv || processing) return;
   processing = true;
   try {
     if (navigator.vibrate) navigator.vibrate(30);
-    const frame = camera.grabFrame();
-    await runPipeline(frame, det);
+    busy(true, '촬영 중…', 0.03);
+    const { frame, fromStill } = await acquireFrame();
+    // A still photo has its own resolution/field of view, so the live
+    // detection cannot be reused; the pipeline re-detects on the photo.
+    await runPipeline(frame, fromStill ? null : det);
   } catch (e) {
+    busy(false);
     toast(`실패: ${(e as Error).message}`);
     console.error(e);
   } finally {
@@ -477,6 +534,23 @@ startBtn.addEventListener('click', async () => {
 });
 
 $('#shutter').addEventListener('click', () => capture(lastDetection));
+
+// Tap-to-focus: forward the tapped point to the camera and show a ring.
+const viewport = $('#scan .viewport');
+viewport.addEventListener('pointerdown', (e) => {
+  if (processing || !camera.running) return;
+  const r = viewport.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width;
+  const y = (e.clientY - r.top) / r.height;
+  lastRefocus = performance.now();
+  void camera.refocus(x, y);
+  const ring = document.createElement('div');
+  ring.className = 'focus-ring';
+  ring.style.left = `${e.clientX - r.left}px`;
+  ring.style.top = `${e.clientY - r.top}px`;
+  viewport.appendChild(ring);
+  setTimeout(() => ring.remove(), 900);
+});
 
 $('#auto').addEventListener('click', () => {
   autoCapture = !autoCapture;

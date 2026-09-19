@@ -80,3 +80,7 @@ textarea.ocr { width: 100%; min-height: 180px; flex: 1; resize: vertical; border
 .link { color: var(--muted); text-decoration: underline; font-size: 14px; }
 input[type=file] { display: none; }
 select.lang { background: rgba(255,255,255,.12); color: inherit; border: 0; border-radius: 999px; padding: 8px 10px; font-weight: 600; font-size: 13px; }
+
+.focus-ring { position: absolute; width: 64px; height: 64px; margin: -32px 0 0 -32px; border: 2px solid var(--accent-2); border-radius: 50%;
+  pointer-events: none; animation: focus-pop .9s ease-out forwards; }
+@keyframes focus-pop { 0% { transform: scale(1.4); opacity: 0; } 30% { opacity: 1; } 100% { transform: scale(.9); opacity: 0; } }
