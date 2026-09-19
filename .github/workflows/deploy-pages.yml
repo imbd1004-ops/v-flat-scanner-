@@ -1,5 +1,5 @@
 # Publishes the PWA to GitHub Pages so it can be installed on a phone.
-# One-time setup: repository Settings → Pages → Source: "GitHub Actions".
+# The configure-pages step enables Pages (source: GitHub Actions) on first run.
 name: Deploy to GitHub Pages
 on:
   push:
@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22

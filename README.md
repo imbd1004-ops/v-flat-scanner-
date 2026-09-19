@@ -41,9 +41,8 @@ Playwright가 설치된 브라우저를 못 찾으면 `CHROMIUM_PATH=/path/to/ch
 
 카메라 API는 HTTPS(또는 localhost)에서만 열립니다. 가장 쉬운 방법은 GitHub Pages입니다.
 
-1. 저장소 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 설정합니다.
-2. `main` 브랜치에 푸시하면 `.github/workflows/deploy-pages.yml`이 `https://<계정>.github.io/<저장소>/`에 배포합니다.
-3. 휴대폰 Chrome/Safari에서 그 주소를 열고 **홈 화면에 추가**를 누르면 전체화면 앱으로 실행됩니다. 이후에는 오프라인에서도 동작합니다.
+1. `main` 브랜치에 푸시하면 `.github/workflows/deploy-pages.yml`이 Pages를 활성화하고 `https://<계정>.github.io/<저장소>/`에 배포합니다.
+2. 휴대폰 Chrome/Safari에서 그 주소를 열고 **홈 화면에 추가**를 누르면 전체화면 앱으로 실행됩니다. 이후에는 오프라인에서도 동작합니다.
 
 같은 Wi-Fi에서 개발 중에 테스트하려면 `npm run dev` 후 `ngrok http 5173` 같은 터널이나, Chrome의 `chrome://flags/#unsafely-treat-insecure-origin-as-secure`에 PC 주소를 등록하는 방법을 쓸 수 있습니다.
 
